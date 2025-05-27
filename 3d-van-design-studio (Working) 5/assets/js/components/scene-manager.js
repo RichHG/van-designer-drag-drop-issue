@@ -10,8 +10,9 @@ constructor(canvasId) {
     this.mouse = null;
     this.gridHelper = null;
     this.measurementHelper = null;
+    this.transformControlsManager = null;
     this.selectedObject = null;
-    this.dragControlsManager = null; // Add this line
+    this.dragControlsManager = null; 
 
     // Event callbacks
     this.onObjectSelected = null;
@@ -54,6 +55,8 @@ this.controls.maxPolarAngle = Math.PI / 2;
   
   // Initialize drag controls manager - Add this line here
     this.dragControlsManager = new DragControlsManager(this);
+  this.transformControlsManager = new TransformControlsManager(this);
+
 
 // Create raycaster for object selection
 this.raycaster = new THREE.Raycaster();
@@ -140,6 +143,46 @@ this.handleMouseMove(event);
 });
 }
 
+  checkTransformControls() {
+    console.log("TRANSFORM CONTROLS DEBUG:");
+    if (!this.transformControlsManager) {
+        console.error("TransformControlsManager is not initialized");
+        return;
+    }
+    
+    const tc = this.transformControlsManager.transformControls;
+    if (!tc) {
+        console.error("TransformControls object is not created");
+        return;
+    }
+    
+    console.log("TransformControls object:", tc);
+    console.log("In scene?", this.scene.children.includes(tc));
+    console.log("Visible:", tc.visible);
+    console.log("Has object?", tc.object !== null && tc.object !== undefined);
+    console.log("Mode:", tc.mode);
+    console.log("Size:", tc.size);
+    
+    // Check if it's properly rendering
+    const isRendering = tc.parent === this.scene;
+    console.log("Properly parented in scene:", isRendering);
+    
+    // Check transform controls specific properties from Three.js r128
+    console.log("showX:", tc.showX);
+    console.log("showY:", tc.showY);
+    console.log("showZ:", tc.showZ);
+    
+    // Check children
+    if (tc.children && tc.children.length > 0) {
+        console.log("Children count:", tc.children.length);
+        tc.children.forEach((child, i) => {
+            console.log(`Child ${i}:`, child.type, child.visible);
+        });
+    } else {
+        console.log("No children found in transform controls");
+    }
+}
+  
 handleMouseClick(event) {
 // Calculate mouse position in normalized device coordinates
 const rect = this.renderer.domElement.getBoundingClientRect();
@@ -212,37 +255,73 @@ break;
 }
 }
 
+// Update the selectObject method:
 selectObject(object) {
-// Deselect previous object if any
-if (this.selectedObject) {
-this.deselectObject();
+    // Deselect previous object if any
+    if (this.selectedObject) {
+        this.deselectObject();
+    }
+
+    // Set new selected object
+    this.selectedObject = object;
+
+    // Add selection outline
+    this.addSelectionOutline(object);
+    
+    // Attach transform controls to the selected object if it's furniture
+    if (object && object.userData && object.userData.isFurniture) {
+        console.log("SceneManager: Attaching transform controls to selected furniture");
+        
+        if (this.transformControlsManager) {
+            // Make sure transform controls manager exists and is properly initialized
+            if (!this.transformControlsManager.transformControls) {
+                console.error("TransformControls not created! Reinitializing...");
+                this.transformControlsManager.init();
+            }
+            
+            // Double check that transform controls are in the scene
+            if (this.transformControlsManager.transformControls && 
+                !this.scene.children.includes(this.transformControlsManager.transformControls)) {
+                console.log("TransformControls not found in scene, adding it now");
+                this.scene.add(this.transformControlsManager.transformControls);
+            }
+            
+            // Now attach the object
+            this.transformControlsManager.attach(object);
+            
+            // Debug check
+            setTimeout(() => this.checkTransformControls(), 100);
+        } else {
+            console.error("Transform controls manager is not initialized!");
+        }
+    }
+
+    // Call the callback if defined
+    if (this.onObjectSelected) {
+        this.onObjectSelected(object);
+    }
 }
 
-// Set new selected object
-this.selectedObject = object;
-
-// Add selection outline
-this.addSelectionOutline(object);
-
-// Call the callback if defined
-if (this.onObjectSelected) {
-this.onObjectSelected(object);
-}
-}
-
+// Update the deselectObject method:
 deselectObject() {
-if (this.selectedObject) {
-// Remove selection outline
-this.removeSelectionOutline(this.selectedObject);
+    if (this.selectedObject) {
+        // Remove selection outline
+        this.removeSelectionOutline(this.selectedObject);
+        
+        // Detach transform controls
+        if (this.transformControlsManager) {
+            console.log("SceneManager: Detaching transform controls");
+            this.transformControlsManager.detach();
+        }
 
-// Call the callback if defined
-if (this.onObjectDeselected) {
-this.onObjectDeselected();
-}
+        // Call the callback if defined
+        if (this.onObjectDeselected) {
+            this.onObjectDeselected();
+        }
 
-// Clear selected object
-this.selectedObject = null;
-}
+        // Clear selected object
+        this.selectedObject = null;
+    }
 }
 
 addSelectionOutline(object) {
@@ -389,13 +468,30 @@ this.camera.updateProjectionMatrix();
 this.renderer.setSize(this.getWidth(), this.getHeight());
 }
 
+// Add to the animate method:
 animate() {
-requestAnimationFrame(() => this.animate());
-
-// Update controls
-this.controls.update();
-
-// Render scene
-this.renderer.render(this.scene, this.camera);
+    // Request next frame
+    requestAnimationFrame(this.animate.bind(this));
+    
+    // Update the controls
+    this.controls.update();
+    
+    // Make sure transform controls stay visible if active
+    if (this.transformControlsManager && 
+        this.transformControlsManager.transformControls &&
+        this.transformControlsManager.activeObject) {
+        
+        // Make sure it's in the scene
+        if (!this.scene.children.includes(this.transformControlsManager.transformControls)) {
+            console.log("Adding missing transform controls to scene in animation loop");
+            this.scene.add(this.transformControlsManager.transformControls);
+        }
+        
+        // Make sure it's visible
+        this.transformControlsManager.transformControls.visible = true;
+    }
+    
+    // Render the scene
+    this.renderer.render(this.scene, this.camera);
 }
 }
